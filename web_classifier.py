@@ -18,7 +18,7 @@ except ImportError:
     SELENIUM_AVAILABLE = False
 
 USE_LOCAL_AI = True 
-LOCAL_AI_MODEL = 'deepseek-r1:14b' 
+LOCAL_AI_MODEL = 'deepseek-r1:32b' 
 LOCAL_AI_URL = 'http://localhost:11434/api/generate' 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
