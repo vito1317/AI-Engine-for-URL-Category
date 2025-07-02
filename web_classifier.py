@@ -34,7 +34,7 @@ if not USE_LOCAL_AI:
 START_URLS = ["https://www.gamer.com.tw/", "https://www.dcard.tw/f", "https://www.ettoday.net/", "https://www.wikipedia.org/", "https://google.com.tw/", "https://www.yahoo.com/", "https://www.facebook.com/", "https://www.youtube.com/", "https://www.instagram.com/", "https://www.twitter.com/", "https://www.linkedin.com/", "https://www.reddit.com/", "https://www.quora.com/", "https://www.twitch.tv/", "https://www.netflix.com/", "https://www.amazon.com/", "https://www.ebay.com/", "https://www.alibaba.com/", "https://www.taobao.com/", "https://www.pchome.com.tw/", "https://www.ruten.com.tw/", "https://www.momoshop.com.tw/", "https://www.books.com.tw/", "https://www.cw.com.tw/", "https://www.chinatimes.com/", "https://www.ltn.com.tw/", "https://www.udn.com/", "https://www.bbc.com/", "https://www.cnn.com/", "https://www.nytimes.com/", "https://www.wsj.com/", "https://www.reuters.com/", "https://www.aljazeera.com/", "https://www.npr.org/", "https://www.bloomberg.com/", "https://www.forbes.com/", "https://www.theguardian.com/", "https://www.huffpost.com/", "https://www.vox.com/", "https://www.washingtonpost.com/", "https://www.vice.com/", "https://www.foxnews.com/", "https://www.infowars.com/", "https://github.com/"]
 DB_NAME = "domain_classification.db"
 
-MAX_DOMAINS_TO_CRAWL = 20
+MAX_DOMAINS_TO_CRAWL = 200000000
 
 CLASSIFICATION_SCHEMA_JSON = """
 {
@@ -292,6 +292,8 @@ def get_summary_prompt(text_content):
     """產生用於第一階段「摘要」的提示"""
     return f"""Analyze the following website text content and provide a single, concise, one-sentence summary in Traditional Chinese that describes the website's primary purpose.
 
+**SPECIAL RULE:** If the content appears to be a security check, firewall, or block page (e.g., from Cloudflare), your summary MUST be "這是一個防火牆或安全檢查頁面。".
+
 **Website Text Content:**
 ---
 {text_content}
@@ -300,28 +302,33 @@ def get_summary_prompt(text_content):
 Your response MUST be only the one-sentence summary and nothing else.
 """
 
-def get_classification_from_summary_prompt(schema_str, summary):
-    """產生用於第二階段「基於摘要分類」的提示"""
-    return f"""You are a JSON-generating robot. Your task is to classify the provided website summary.
+def get_classification_from_summary_prompt(schema_str, url, summary):
+    """
+    產生用於第二階段「基於摘要和URL分類」的提示
+    """
+    return f"""You are a JSON-generating robot. Your task is to classify the provided website based on its URL and summary.
 
 **Classification Schema:**
 ---
 {schema_str}
 ---
 
-**Website Summary to Classify:**
-"{summary}"
+**Information to Classify:**
+- **URL:** `{url}`
+- **Summary:** "{summary}"
 
 **INSTRUCTIONS:**
-1.  Read the provided summary.
-2.  Based *only* on the summary, choose the most accurate `main_category_code` and `subcategory_code` from the schema.
+1.  Analyze both the URL and the Summary to understand the website's true identity and purpose. The URL provides crucial context.
+2.  Based on your combined analysis, choose the most accurate `main_category_code` and `subcategory_code` from the schema.
 3.  Construct a JSON object with your results.
+
+**SPECIAL RULE:** If the summary is "這是一個防火牆或安全檢查頁面。", you **MUST** classify it with `main_category_code: "999"` and `subcategory_code: "999-02"`.
 
 **OUTPUT RULES:**
 - Your response **MUST ONLY** be a single, valid JSON object.
 - The JSON **MUST** contain two keys: `main_category_code` and `subcategory_code`.
 
-Now, classify the summary and provide ONLY the JSON object.
+Now, classify the website and provide ONLY the JSON object.
 """
 
 
@@ -377,7 +384,7 @@ class LocalOllamaClassifier(AIClassifier):
         
         print(f"INFO: 第一階段摘要完成: {summary}")
 
-        classification_prompt = get_classification_from_summary_prompt(self.schema_json_str, summary)
+        classification_prompt = get_classification_from_summary_prompt(self.schema_json_str, url, summary)
         classification_result = self._call_ollama(classification_prompt, f"{url} [分類階段]", expect_json=True)
         
         if not classification_result:
@@ -552,7 +559,7 @@ def main():
         print("建議執行：pip install selenium webdriver-manager")
 
     if not USE_LOCAL_AI:
-        print("錯誤：目前的兩階段分類邏輯僅為本地 AI 進行了優化。請將 USE_LOCAL_AI 設為 True。")
+        print("錯誤：目前的兩階段分類邏輯尚未為 Gemini API 進行優化。請將 USE_LOCAL_AI 設為 True。")
         return
         
     classifier = LocalOllamaClassifier(model=LOCAL_AI_MODEL, api_url=LOCAL_AI_URL, schema_json=CLASSIFICATION_SCHEMA_JSON)
