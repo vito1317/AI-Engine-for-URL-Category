@@ -3,6 +3,7 @@ import sqlite3
 import requests
 import time
 import json
+import re
 from bs4 import BeautifulSoup
 from collections import deque
 from urllib.parse import urljoin, urlparse
@@ -17,11 +18,11 @@ except ImportError:
     SELENIUM_AVAILABLE = False
 
 USE_LOCAL_AI = True 
-LOCAL_AI_MODEL = 'gemma3:1b' 
+LOCAL_AI_MODEL = 'gemma:2b' 
 LOCAL_AI_URL = 'http://localhost:11434/api/generate' 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_NAME = 'gemini-2.5-pro'
+GEMINI_MODEL_NAME = 'gemini-1.5-flash-latest'
 
 if not USE_LOCAL_AI:
     try:
@@ -352,10 +353,13 @@ class LocalOllamaClassifier(AIClassifier):
             print(f"DEBUG: Ollama 原始回覆: {raw_response_str}")
             if not raw_response_str: return None
             
+            cleaned_str = re.sub(r'<think>.*?</think>', '', raw_response_str, flags=re.DOTALL).strip()
+            
             if expect_json:
-                return json.loads(raw_response_str.strip().lstrip('```json').rstrip('```').strip())
+                json_str = cleaned_str.lstrip('```json').rstrip('```').strip()
+                return json.loads(json_str)
             else:
-                return raw_response_str.strip()
+                return cleaned_str
         except requests.exceptions.ConnectionError:
             print(f"\n錯誤：無法連線至本地 Ollama 服務 ({self.api_url})。")
             exit()
