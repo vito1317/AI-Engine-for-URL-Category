@@ -31,8 +31,7 @@ if not USE_LOCAL_AI:
         print("錯誤：當使用雲端 AI 時，未安裝 'google-generativeai' 函式庫。請執行 'pip install google-generativeai'")
         exit()
 
-START_URLS = ["https://www.gamer.com.tw/", "https://www.dcard.tw/f", "https://www.ettoday.net/", "https://www.wikipedia.org/"]
-
+START_URLS = ["https://www.gamer.com.tw/", "https://www.dcard.tw/f", "https://www.ettoday.net/", "https://www.wikipedia.org/", "https://google.com.tw/", "https://www.yahoo.com/", "https://www.facebook.com/", "https://www.youtube.com/", "https://www.instagram.com/", "https://www.twitter.com/", "https://www.linkedin.com/", "https://www.reddit.com/", "https://www.quora.com/", "https://www.twitch.tv/", "https://www.netflix.com/", "https://www.amazon.com/", "https://www.ebay.com/", "https://www.alibaba.com/", "https://www.taobao.com/", "https://www.pchome.com.tw/", "https://www.ruten.com.tw/", "https://www.momoshop.com.tw/", "https://www.books.com.tw/", "https://www.cw.com.tw/", "https://www.chinatimes.com/", "https://www.ltn.com.tw/", "https://www.udn.com/", "https://www.bbc.com/", "https://www.cnn.com/", "https://www.nytimes.com/", "https://www.wsj.com/", "https://www.reuters.com/", "https://www.aljazeera.com/", "https://www.npr.org/", "https://www.bloomberg.com/", "https://www.forbes.com/", "https://www.theguardian.com/", "https://www.huffpost.com/", "https://www.vox.com/", "https://www.washingtonpost.com/", "https://www.vice.com/", "https://www.foxnews.com/", "https://www.infowars.com/", "https://github.com/"]
 DB_NAME = "domain_classification.db"
 
 MAX_DOMAINS_TO_CRAWL = 20
