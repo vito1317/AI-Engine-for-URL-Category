@@ -291,8 +291,15 @@ class DatabaseManager:
         print("資料庫連線已關閉。")
 
 
-def get_summary_prompt(text_content):
-    """產生用於第一階段「摘要」的提示"""
+def get_knowledge_summary_prompt(url):
+    """產生用於第一階段「知識庫摘要」的提示"""
+    return f"""Based on your knowledge, what is the website `{url}`? 
+Answer with a single, concise, one-sentence summary in Traditional Chinese.
+If you do not recognize this website, you **MUST** respond with the exact phrase: "UNKNOWN".
+"""
+
+def get_content_summary_prompt(text_content):
+    """產生用於第一階段「內容摘要」的提示"""
     return f"""Analyze the following website text content and provide a single, concise, one-sentence summary in Traditional Chinese that describes the website's primary purpose.
 
 **SPECIAL RULE:** If the content appears to be a security check, firewall, or block page (e.g., from Cloudflare), your summary MUST be "這是一個防火牆或安全檢查頁面。".
@@ -335,7 +342,13 @@ Now, classify the website and provide ONLY the JSON object.
 
 class AIClassifier:
     """分類器的抽象基底類別"""
-    def classify_from_content(self, text_content, url):
+    def get_summary_from_knowledge(self, url):
+        raise NotImplementedError
+
+    def get_summary_from_content(self, text_content, url):
+        raise NotImplementedError
+        
+    def classify_from_summary(self, url, summary):
         raise NotImplementedError
 
 class LocalOllamaClassifier(AIClassifier):
@@ -374,32 +387,28 @@ class LocalOllamaClassifier(AIClassifier):
             print(f"呼叫本地 Ollama API 或處理回傳時發生錯誤: {e}")
             return None
 
-    def classify_from_content(self, text_content, url):
-        """執行「摘要 -> 分類」的兩階段流程"""
-        summary_prompt = get_summary_prompt(text_content[:8000])
-        summary = self._call_ollama(summary_prompt, f"{url} [摘要階段]")
-        
-        if not summary:
-            print("錯誤：第一階段未能產生摘要。")
+    def get_summary_from_knowledge(self, url):
+        prompt = get_knowledge_summary_prompt(url)
+        summary = self._call_ollama(prompt, f"{url} [知識庫摘要]")
+        if summary and "UNKNOWN" in summary.upper():
             return None
-        
-        print(f"INFO: 第一階段摘要完成: {summary}")
+        return summary
 
+    def get_summary_from_content(self, text_content, url):
+        prompt = get_summary_prompt(text_content[:8000])
+        return self._call_ollama(prompt, f"{url} [內容摘要]")
+
+    def classify_from_summary(self, url, summary):
         classification_result = None
         for attempt in range(MAX_CLASSIFICATION_RETRIES):
-            classification_prompt = get_classification_from_summary_prompt(self.schema_json_str, url, summary)
-            result = self._call_ollama(classification_prompt, f"{url} [分類階段]", expect_json=True)
+            prompt = get_classification_from_summary_prompt(self.schema_json_str, url, summary)
+            result = self._call_ollama(prompt, f"{url} [分類階段]", expect_json=True)
             if result and result.get("main_category_code"):
                 classification_result = result
                 break
             print(f"警告：分類階段失敗。將在 {RETRY_DELAY} 秒後進行第 {attempt + 2} 次重試...")
             time.sleep(RETRY_DELAY)
         
-        if not classification_result:
-            print("錯誤：第二階段重試多次後仍未能產生分類。")
-            return None
-            
-        classification_result["summary"] = summary
         return classification_result
 
 
@@ -531,30 +540,49 @@ class WebCrawler:
             
             print(f"\n--- 開始處理 ({self.crawled_count + 1}/{max_domains}): {url} ---")
             
-            html_content, final_url = self.scraper.fetch(url)
-
-            if not html_content:
-                print(f"錯誤: 使用所有方法抓取 {url} 皆失敗。將此域名標記為錯誤。")
-                self._save_classification(domain, url, {"main_category_code": "999", "subcategory_code": "999-02", "summary": "爬蟲無法訪問此網站。"})
-                continue
-
-            soup = BeautifulSoup(html_content, 'html.parser')
+            summary = self.classifier.get_summary_from_knowledge(url)
             
-            print("INFO: 開始進行網頁內容分析...")
-            for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
-                tag.decompose()
-            text_content = soup.get_text(separator=' ', strip=True)
+            html_content = None
+            final_url = url
 
-            if text_content and len(text_content) > 150:
-                content_result = self.classifier.classify_from_content(text_content, final_url)
-                if content_result:
-                    self._save_classification(self.get_domain(final_url), final_url, content_result)
+            if not summary:
+                print(f"INFO: AI 不認識此網站 {url}，將抓取內容以產生摘要。")
+                html_content, final_url = self.scraper.fetch(url)
+                
+                if not html_content:
+                    print(f"錯誤: 使用所有方法抓取 {url} 皆失敗。將此域名標記為錯誤。")
+                    self._save_classification(domain, url, {"main_category_code": "999", "subcategory_code": "999-02", "summary": "爬蟲無法訪問此網站。"})
+                    continue
+                
+                soup = BeautifulSoup(html_content, 'html.parser')
+                for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
+                    tag.decompose()
+                text_content = soup.get_text(separator=' ', strip=True)
+
+                if text_content and len(text_content) > 150:
+                    summary = self.classifier.get_summary_from_content(text_content, final_url)
                 else:
-                    print(f"域名 {domain} 的內容分析失敗。")
-            else:
-                print(f"域名 {domain} 的文字內容太少，無法進行內容分析。")
+                    summary = "無法從網頁內容產生有效摘要。"
+            
+            if not summary:
+                print(f"錯誤: 無法為 {url} 產生摘要，跳過此網站。")
+                continue
+            
+            print(f"INFO: 取得摘要: '{summary}'")
 
-            self._find_and_queue_new_links(soup, final_url)
+            classification_result = self.classifier.classify_from_summary(final_url, summary)
+            if classification_result:
+                classification_result['summary'] = summary
+                self._save_classification(self.get_domain(final_url), final_url, classification_result)
+            else:
+                print(f"域名 {domain} 的內容分析失敗。")
+
+            if html_content is None:
+                html_content, _ = self.scraper.fetch(url)
+            
+            if html_content:
+                soup = BeautifulSoup(html_content, 'html.parser')
+                self._find_and_queue_new_links(soup, final_url)
             
             time.sleep(1)
 
