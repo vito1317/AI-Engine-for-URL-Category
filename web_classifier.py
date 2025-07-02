@@ -17,7 +17,7 @@ except ImportError:
     SELENIUM_AVAILABLE = False
 
 USE_LOCAL_AI = True 
-LOCAL_AI_MODEL = 'deepseek-r1:1.5b' 
+LOCAL_AI_MODEL = 'gemma3:1b' 
 LOCAL_AI_URL = 'http://localhost:11434/api/generate' 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -290,53 +290,70 @@ class DatabaseManager:
 
 def get_knowledge_check_prompt(schema_str, url):
     """
-    產生用於知識檢查的提示，採用「角色扮演」和「強制約束」的指令風格。
+    產生用於知識檢查的提示，導入「自我校驗」機制。
     """
-    return f"""You are a JSON-generating robot. Your sole purpose is to analyze the website `{url}` based on your internal knowledge and return a single, valid JSON object according to the provided schema.
+    return f"""You are a highly intelligent JSON-generating robot. Your mission is to classify the website `{url}` with extreme accuracy based on your knowledge. Follow these steps precisely.
 
-**SCHEMA:**
+**Step 1: Recall and Summarize**
+- Access your internal knowledge about `{url}`.
+- Formulate a one-sentence summary in Traditional Chinese describing its primary purpose.
+
+**Step 2: Initial Classification**
+- Based on your summary from Step 1, select the most appropriate `main_category_code` and `subcategory_code` from the schema below.
+
+**Step 3: Self-Correction and Verification (CRITICAL)**
+- **Compare your summary with your chosen category.** Do they logically match?
+- **Example:** If your summary is "這是一個線上零售網站" (This is an online retail site), your category **MUST** be `050` (Commerce & Shopping). If you initially chose `080` (News), you **MUST** correct it to `050`.
+- This step is mandatory to ensure accuracy.
+
+**Step 4: Generate Final JSON**
+- After verification, construct the final JSON object.
+
 ---
+**Classification Schema:**
 {schema_str}
 ---
 
-**YOUR TASK:**
-1.  Access your knowledge about `{url}`.
-2.  If you recognize it, you **MUST** choose the most fitting `main_category_code` and `subcategory_code` from the schema.
-3.  If you do not recognize it, you **MUST** decide it is unknown.
-4.  You **MUST** then generate a JSON object based on your decision.
-
 **OUTPUT RULES:**
-- Your response **MUST ONLY** be a JSON object. No other text or explanation is allowed.
-- A known site's JSON **MUST** contain: `"known": true`, `main_category_code`, `subcategory_code`, `summary`.
-- An unknown site's JSON **MUST** contain only: `"known": false`.
+- If you know the site, your response **MUST ONLY** be a JSON object with four keys: `"known": true`, `main_category_code`, `subcategory_code`, and `summary`.
+- If you do not know the site, your response **MUST ONLY** be a JSON object with one key: `"known": false`.
+- Do not include your reasoning or any other text in the final output.
 
-Now, perform your task for `{url}`.
+Now, perform your full analysis and verification for `{url}` and provide ONLY the JSON object.
 """
 
 def get_content_analysis_prompt(schema_str, url, text_content):
     """
-    產生用於內容分析的提示，採用「角色扮演」和「強制約束」的指令風格。
+    產生用於內容分析的提示，導入「自我校驗」機制。
     """
-    return f"""You are a JSON-generating robot. Your sole purpose is to analyze the provided text content and return a single, valid JSON object according to the provided schema.
+    return f"""You are a highly intelligent JSON-generating robot. Your mission is to classify the provided website content with extreme accuracy. Follow these steps precisely.
 
-**SCHEMA:**
+**Step 1: Analyze and Summarize**
+- Analyze the `Website Text Content` below.
+- Formulate a one-sentence summary in Traditional Chinese describing its primary purpose.
+
+**Step 2: Initial Classification**
+- Based on your summary from Step 1, select the most appropriate `main_category_code` and `subcategory_code` from the schema below.
+
+**Step 3: Self-Correction and Verification (CRITICAL)**
+- **Compare your summary with your chosen category.** Do they logically match?
+- **Example:** If your summary is "這是一個關於財經新聞的網站" (This is a site about financial news), your category **MUST** be `060` (Finance & Business Services) or `080` (Information & News). If you initially chose `040` (Entertainment), you **MUST** correct it.
+- This step is mandatory to ensure accuracy.
+
+**Step 4: Generate Final JSON**
+- After verification, construct the final JSON object.
+
 ---
+**Classification Schema:**
 {schema_str}
 ---
 
-**YOUR TASK:**
-1.  Analyze the `Website Text Content` below to understand its primary purpose.
-2.  Based on your analysis, choose the most accurate `main_category_code` and `subcategory_code` from the schema.
-3.  Write a one-sentence summary in Traditional Chinese.
-4.  Construct a JSON object with your results.
-
 **SPECIAL RULE (HIGHEST PRIORITY):**
-- If the text content appears to be a security check, firewall, or block page (e.g., from Cloudflare, "checking your browser"), you **MUST** ignore the content's topic and immediately classify it with `main_category_code: "999"` and `subcategory_code: "999-02"`.
+- If the text content appears to be a security check, firewall, or block page (e.g., from Cloudflare), you **MUST** ignore all other steps and immediately classify it with `main_category_code: "999"` and `subcategory_code: "999-02"`.
 
 **OUTPUT RULES:**
-- Your response **MUST ONLY** be a JSON object. No other text or explanation is allowed.
-- The JSON **MUST** contain three keys: `main_category_code`, `subcategory_code`, and `summary`.
-- Your classification **MUST** be based strictly on the provided content and the special rule.
+- Your response **MUST ONLY** be a JSON object with three keys: `main_category_code`, `subcategory_code`, and `summary`.
+- Your classification **MUST** be based strictly on the provided content and the verification step.
 
 ---
 **Website Text Content to Analyze:**
@@ -345,7 +362,7 @@ Content:
 {text_content}
 ---
 
-Now, perform your task.
+Now, perform your full analysis and verification and provide ONLY the JSON object.
 """
 
 class AIClassifier:
