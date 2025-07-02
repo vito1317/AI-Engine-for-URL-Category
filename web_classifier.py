@@ -18,11 +18,11 @@ except ImportError:
     SELENIUM_AVAILABLE = False
 
 USE_LOCAL_AI = True 
-LOCAL_AI_MODEL = 'gemma:2b' 
+LOCAL_AI_MODEL = 'deepseek-r1:14b' 
 LOCAL_AI_URL = 'http://localhost:11434/api/generate' 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_NAME = 'gemini-1.5-flash-latest'
+GEMINI_MODEL_NAME = 'gemini-2.5-pro'
 
 if not USE_LOCAL_AI:
     try:
