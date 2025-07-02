@@ -395,7 +395,7 @@ class LocalOllamaClassifier(AIClassifier):
         return summary
 
     def get_summary_from_content(self, text_content, url):
-        prompt = get_summary_prompt(text_content[:8000])
+        prompt = get_content_summary_prompt(text_content[:8000])
         return self._call_ollama(prompt, f"{url} [內容摘要]")
 
     def classify_from_summary(self, url, summary):
@@ -406,7 +406,7 @@ class LocalOllamaClassifier(AIClassifier):
             if result and result.get("main_category_code"):
                 classification_result = result
                 break
-            print(f"警告：分類階段失敗。將在 {RETRY_DELAY} 秒後進行第 {attempt + 2} 次重試...")
+            print(f"警告：分類階段失敗。將在 {RETRY_DELAY} 秒後進行第 {attempt + 1} 次重試...")
             time.sleep(RETRY_DELAY)
         
         return classification_result
