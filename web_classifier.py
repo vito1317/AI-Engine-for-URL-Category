@@ -291,95 +291,76 @@ class DatabaseManager:
         print("資料庫連線已關閉。")
 
 
-def get_knowledge_summary_prompt(url):
-    """產生用於第一階段「知識庫摘要」的提示"""
-    return f"""Based on your knowledge, what is the website `{url}`? 
-Answer with a single, concise, one-sentence summary in Traditional Chinese.
-If you do not recognize this website, you **MUST** respond with the exact phrase: "UNKNOWN".
-"""
+def get_classification_prompt(schema_str, url, content=None):
+    """
+    產生用於分類的統一指令，導入「強制思考框架」。
+    """
+    task_description = f"classify the website `{url}` based on your internal knowledge."
+    if content:
+        task_description = f"classify the website `{url}` based on the provided text content."
 
-def get_content_summary_prompt(text_content):
-    """產生用於第一階段「內容摘要」的提示"""
-    return f"""Analyze the following website text content and provide a single, concise, one-sentence summary in Traditional Chinese that describes the website's primary purpose.
+    return f"""You are a meticulous, logical website classifier. Your mission is to {task_description}
 
-**SPECIAL RULE:** If the content appears to be a security check, firewall, or block page (e.g., from Cloudflare), your summary MUST be "這是一個防火牆或安全檢查頁面。".
+First, you **MUST** write down your reasoning process within a `<thinking>` block. This block will be ignored in the final output but is a mandatory step for you. Inside `<thinking>`, you must:
+1.  **Analyze:** Briefly describe the website's primary purpose based on the provided information (your knowledge or the text content).
+2.  **Summarize:** Formulate a one-sentence summary in Traditional Chinese. If the content is a block page, the summary must be "這是一個防火牆或安全檢查頁面。".
+3.  **Categorize:** Based on your analysis, select the most appropriate `main_category_code` and `subcategory_code` from the schema below.
+4.  **Verify:** Check if your summary logically matches your chosen category. If not, correct the category.
 
-**Website Text Content:**
+After the `<thinking>` block, you **MUST** provide a single, valid JSON object as your final answer.
+
 ---
-{text_content}
----
-
-Your response MUST be only the one-sentence summary and nothing else.
-"""
-
-def get_classification_from_summary_prompt(schema_str, url, summary):
-    """產生用於第二階段「基於摘要和URL分類」的提示"""
-    return f"""You are a JSON-generating robot. Your task is to classify the provided website based on its URL and summary.
-
 **Classification Schema:**
----
 {schema_str}
 ---
 
-**Information to Classify:**
-- **URL:** `{url}`
-- **Summary:** "{summary}"
-
-**INSTRUCTIONS:**
-1.  Analyze both the URL and the Summary to understand the website's true identity and purpose. The URL provides crucial context.
-2.  Based on your combined analysis, choose the most accurate `main_category_code` and `subcategory_code` from the schema.
-3.  Construct a JSON object with your results.
-
-**SPECIAL RULE:** If the summary is "這是一個防火牆或安全檢查頁面。", you **MUST** classify it with `main_category_code: "999"` and `subcategory_code: "999-02"`.
+**Input Content (if available):**
+---
+{content if content else "N/A"}
+---
 
 **OUTPUT RULES:**
-- Your response **MUST ONLY** be a single, valid JSON object.
-- The JSON **MUST** contain two keys: `main_category_code` and `subcategory_code`.
+- Your response **MUST** start with a `<thinking>` block, followed by the final JSON object.
+- The final JSON object **MUST** be the only thing outside the `<thinking>` block.
+- The JSON object **MUST** contain three keys: `main_category_code`, `subcategory_code`, and `summary`.
+- For block pages, you **MUST** use `main_category_code: "999"` and `subcategory_code: "999-02"`.
 
-Now, classify the website and provide ONLY the JSON object.
+Now, perform your full analysis and verification for `{url}`.
 """
 
 
 class AIClassifier:
     """分類器的抽象基底類別"""
-    def get_summary_from_knowledge(self, url):
-        raise NotImplementedError
-
-    def get_summary_from_content(self, text_content, url):
-        raise NotImplementedError
-        
-    def classify_from_summary(self, url, summary):
+    def classify(self, url, text_content=None):
         raise NotImplementedError
 
 class LocalOllamaClassifier(AIClassifier):
-    """使用本地運行的 Ollama 服務進行兩階段分類"""
+    """使用本地運行的 Ollama 服務進行分類"""
     def __init__(self, model, api_url, schema_json):
         self.model = model
         self.api_url = api_url
         self.schema_json_str = schema_json
         print(f"本地 Ollama 分類器已初始化，使用模型: {self.model}")
 
-    def _call_ollama(self, prompt, url_for_log, expect_json=False):
+    def _call_ollama(self, prompt, url_for_log):
         payload = {"model": self.model, "prompt": prompt, "stream": False}
-        if expect_json:
-            payload["format"] = "json"
-        
         try:
-            print(f"正在向本地 Ollama API 請求 ({'JSON' if expect_json else 'Text'}): {url_for_log}")
+            print(f"正在向本地 Ollama API 請求: {url_for_log}")
             response = requests.post(self.api_url, json=payload, timeout=180)
             response.raise_for_status()
             response_data = response.json()
             raw_response_str = response_data.get('response', '')
-            print(f"DEBUG: Ollama 原始回覆: {raw_response_str}")
+            print(f"DEBUG: Ollama 原始回覆:\n{raw_response_str}")
             if not raw_response_str: return None
             
-            cleaned_str = re.sub(r'<think>.*?</think>', '', raw_response_str, flags=re.DOTALL).strip()
-            
-            if expect_json:
-                json_str = cleaned_str.lstrip('```json').rstrip('```').strip()
+            json_match = re.search(r'</thinking>\s*(\{.*)', raw_response_str, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1).strip()
+                json_str = json_str.lstrip('```json').rstrip('```').strip()
                 return json.loads(json_str)
             else:
-                return cleaned_str
+                print("警告: 在 AI 回覆中找不到有效的 JSON 區塊。")
+                return None
         except requests.exceptions.ConnectionError:
             print(f"\n錯誤：無法連線至本地 Ollama 服務 ({self.api_url})。")
             exit()
@@ -387,28 +368,16 @@ class LocalOllamaClassifier(AIClassifier):
             print(f"呼叫本地 Ollama API 或處理回傳時發生錯誤: {e}")
             return None
 
-    def get_summary_from_knowledge(self, url):
-        prompt = get_knowledge_summary_prompt(url)
-        summary = self._call_ollama(prompt, f"{url} [知識庫摘要]")
-        if summary and "UNKNOWN" in summary.upper():
-            return None
-        return summary
-
-    def get_summary_from_content(self, text_content, url):
-        prompt = get_content_summary_prompt(text_content[:8000])
-        return self._call_ollama(prompt, f"{url} [內容摘要]")
-
-    def classify_from_summary(self, url, summary):
+    def classify(self, url, text_content=None):
         classification_result = None
         for attempt in range(MAX_CLASSIFICATION_RETRIES):
-            prompt = get_classification_from_summary_prompt(self.schema_json_str, url, summary)
-            result = self._call_ollama(prompt, f"{url} [分類階段]", expect_json=True)
+            prompt = get_classification_prompt(self.schema_json_str, url, content=text_content)
+            result = self._call_ollama(prompt, f"{url} [Attempt {attempt + 1}]")
             if result and result.get("main_category_code"):
                 classification_result = result
                 break
-            print(f"警告：分類階段失敗。將在 {RETRY_DELAY} 秒後進行第 {attempt + 1} 次重試...")
+            print(f"警告：分類失敗。將在 {RETRY_DELAY} 秒後進行第 {attempt + 2} 次重試...")
             time.sleep(RETRY_DELAY)
-        
         return classification_result
 
 
@@ -540,49 +509,35 @@ class WebCrawler:
             
             print(f"\n--- 開始處理 ({self.crawled_count + 1}/{max_domains}): {url} ---")
             
-            summary = self.classifier.get_summary_from_knowledge(url)
+            result = self.classifier.classify(url)
             
-            html_content = None
-            final_url = url
-
-            if not summary:
-                print(f"INFO: AI 不認識此網站 {url}，將抓取內容以產生摘要。")
+            if not result:
+                print(f"INFO: AI 不認識此網站或知識庫分類失敗，將抓取內容進行分析。")
                 html_content, final_url = self.scraper.fetch(url)
-                
+
                 if not html_content:
                     print(f"錯誤: 使用所有方法抓取 {url} 皆失敗。將此域名標記為錯誤。")
                     self._save_classification(domain, url, {"main_category_code": "999", "subcategory_code": "999-02", "summary": "爬蟲無法訪問此網站。"})
                     continue
-                
+
                 soup = BeautifulSoup(html_content, 'html.parser')
                 for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
                     tag.decompose()
                 text_content = soup.get_text(separator=' ', strip=True)
 
                 if text_content and len(text_content) > 150:
-                    summary = self.classifier.get_summary_from_content(text_content, final_url)
+                    result = self.classifier.classify(final_url, text_content=text_content[:8000])
                 else:
-                    summary = "無法從網頁內容產生有效摘要。"
+                    print(f"域名 {domain} 的文字內容太少，無法進行內容分析。")
             
-            if not summary:
-                print(f"錯誤: 無法為 {url} 產生摘要，跳過此網站。")
-                continue
-            
-            print(f"INFO: 取得摘要: '{summary}'")
-
-            classification_result = self.classifier.classify_from_summary(final_url, summary)
-            if classification_result:
-                classification_result['summary'] = summary
-                self._save_classification(self.get_domain(final_url), final_url, classification_result)
+            if result:
+                self._save_classification(self.get_domain(url), url, result)
             else:
-                print(f"域名 {domain} 的內容分析失敗。")
+                print(f"域名 {domain} 的所有分類嘗試皆失敗。")
 
-            if html_content is None:
-                html_content, _ = self.scraper.fetch(url)
-            
-            if html_content:
-                soup = BeautifulSoup(html_content, 'html.parser')
-                self._find_and_queue_new_links(soup, final_url)
+            if 'html_content' in locals() and html_content:
+                 soup = BeautifulSoup(html_content, 'html.parser')
+                 self._find_and_queue_new_links(soup, url)
             
             time.sleep(1)
 
@@ -595,7 +550,7 @@ def main():
         print("建議執行：pip install selenium webdriver-manager")
 
     if not USE_LOCAL_AI:
-        print("錯誤：目前的兩階段分類邏輯尚未為 Gemini API 進行優化。請將 USE_LOCAL_AI 設為 True。")
+        print("錯誤：此版本的進階邏輯目前僅針對本地 AI 進行了優化。請將 USE_LOCAL_AI 設為 True。")
         return
         
     classifier = LocalOllamaClassifier(model=LOCAL_AI_MODEL, api_url=LOCAL_AI_URL, schema_json=CLASSIFICATION_SCHEMA_JSON)
