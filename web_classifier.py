@@ -290,7 +290,7 @@ class DatabaseManager:
 
 def get_knowledge_check_prompt(schema_str, url):
     """
-    產生用於知識檢查的提示，導入「自我校驗」機制。
+    產生用於知識檢查的提示，採用「自我校驗」機制。
     """
     return f"""You are a highly intelligent JSON-generating robot. Your mission is to classify the website `{url}` with extreme accuracy based on your knowledge. Follow these steps precisely.
 
@@ -324,7 +324,7 @@ Now, perform your full analysis and verification for `{url}` and provide ONLY th
 
 def get_content_analysis_prompt(schema_str, url, text_content):
     """
-    產生用於內容分析的提示，導入「自我校驗」機制。
+    產生用於內容分析的提示，採用「自我校驗」機制。
     """
     return f"""You are a highly intelligent JSON-generating robot. Your mission is to classify the provided website content with extreme accuracy. Follow these steps precisely.
 
