@@ -30,7 +30,7 @@ if not USE_LOCAL_AI:
         print("錯誤：當使用雲端 AI 時，未安裝 'google-generativeai' 函式庫。請執行 'pip install google-generativeai'")
         exit()
 
-START_URLS = ["https://www.gamer.com.tw/", "https://www.dcard.tw/f", "https://www.ettoday.net/", "https://www.wikipedia.org/", "https://google.com.tw/", "https://www.yahoo.com/", "https://www.facebook.com/", "https://www.youtube.com/", "https://www.instagram.com/", "https://www.twitter.com/", "https://www.linkedin.com/", "https://www.reddit.com/", "https://www.quora.com/", "https://www.twitch.tv/", "https://www.netflix.com/", "https://www.amazon.com/", "https://www.ebay.com/", "https://www.alibaba.com/", "https://www.taobao.com/", "https://www.pchome.com.tw/", "https://www.ruten.com.tw/", "https://www.momoshop.com.tw/", "https://www.books.com.tw/", "https://www.cw.com.tw/", "https://www.chinatimes.com/", "https://www.ltn.com.tw/", "https://www.udn.com/", "https://www.bbc.com/", "https://www.cnn.com/", "https://www.nytimes.com/", "https://www.wsj.com/", "https://www.reuters.com/", "https://www.aljazeera.com/", "https://www.npr.org/", "https://www.bloomberg.com/", "https://www.forbes.com/", "https://www.theguardian.com/", "https://www.huffpost.com/", "https://www.vox.com/", "https://www.washingtonpost.com/", "https://www.vice.com/", "https://www.foxnews.com/", "https://www.infowars.com/", "https://github.com/"]
+START_URLS = ["https://www.gamer.com.tw/", "https://www.dcard.tw/f", "https://www.ettoday.net/", "https://www.wikipedia.org/"]
 
 DB_NAME = "domain_classification.db"
 
@@ -288,88 +288,45 @@ class DatabaseManager:
         print("資料庫連線已關閉。")
 
 
-def get_knowledge_check_prompt(schema_str, url):
-    """
-    產生用於知識檢查的提示，採用「自我校驗」機制。
-    """
-    return f"""You are a highly intelligent JSON-generating robot. Your mission is to classify the website `{url}` with extreme accuracy based on your knowledge. Follow these steps precisely.
+def get_summary_prompt(text_content):
+    """產生用於第一階段「摘要」的提示"""
+    return f"""Analyze the following website text content and provide a single, concise, one-sentence summary in Traditional Chinese that describes the website's primary purpose.
 
-**Step 1: Recall and Summarize**
-- Access your internal knowledge about `{url}`.
-- Formulate a one-sentence summary in Traditional Chinese describing its primary purpose.
-
-**Step 2: Initial Classification**
-- Based on your summary from Step 1, select the most appropriate `main_category_code` and `subcategory_code` from the schema below.
-
-**Step 3: Self-Correction and Verification (CRITICAL)**
-- **Compare your summary with your chosen category.** Do they logically match?
-- **Example:** If your summary is "這是一個線上零售網站" (This is an online retail site), your category **MUST** be `050` (Commerce & Shopping). If you initially chose `080` (News), you **MUST** correct it to `050`.
-- This step is mandatory to ensure accuracy.
-
-**Step 4: Generate Final JSON**
-- After verification, construct the final JSON object.
-
+**Website Text Content:**
 ---
-**Classification Schema:**
-{schema_str}
----
-
-**OUTPUT RULES:**
-- If you know the site, your response **MUST ONLY** be a JSON object with four keys: `"known": true`, `main_category_code`, `subcategory_code`, and `summary`.
-- If you do not know the site, your response **MUST ONLY** be a JSON object with one key: `"known": false`.
-- Do not include your reasoning or any other text in the final output.
-
-Now, perform your full analysis and verification for `{url}` and provide ONLY the JSON object.
-"""
-
-def get_content_analysis_prompt(schema_str, url, text_content):
-    """
-    產生用於內容分析的提示，採用「自我校驗」機制。
-    """
-    return f"""You are a highly intelligent JSON-generating robot. Your mission is to classify the provided website content with extreme accuracy. Follow these steps precisely.
-
-**Step 1: Analyze and Summarize**
-- Analyze the `Website Text Content` below.
-- Formulate a one-sentence summary in Traditional Chinese describing its primary purpose.
-
-**Step 2: Initial Classification**
-- Based on your summary from Step 1, select the most appropriate `main_category_code` and `subcategory_code` from the schema below.
-
-**Step 3: Self-Correction and Verification (CRITICAL)**
-- **Compare your summary with your chosen category.** Do they logically match?
-- **Example:** If your summary is "這是一個關於財經新聞的網站" (This is a site about financial news), your category **MUST** be `060` (Finance & Business Services) or `080` (Information & News). If you initially chose `040` (Entertainment), you **MUST** correct it.
-- This step is mandatory to ensure accuracy.
-
-**Step 4: Generate Final JSON**
-- After verification, construct the final JSON object.
-
----
-**Classification Schema:**
-{schema_str}
----
-
-**SPECIAL RULE (HIGHEST PRIORITY):**
-- If the text content appears to be a security check, firewall, or block page (e.g., from Cloudflare), you **MUST** ignore all other steps and immediately classify it with `main_category_code: "999"` and `subcategory_code: "999-02"`.
-
-**OUTPUT RULES:**
-- Your response **MUST ONLY** be a JSON object with three keys: `main_category_code`, `subcategory_code`, and `summary`.
-- Your classification **MUST** be based strictly on the provided content and the verification step.
-
----
-**Website Text Content to Analyze:**
-URL: {url}
-Content:
 {text_content}
 ---
 
-Now, perform your full analysis and verification and provide ONLY the JSON object.
+Your response MUST be only the one-sentence summary and nothing else.
 """
+
+def get_classification_from_summary_prompt(schema_str, summary):
+    """產生用於第二階段「基於摘要分類」的提示"""
+    return f"""You are a JSON-generating robot. Your task is to classify the provided website summary.
+
+**Classification Schema:**
+---
+{schema_str}
+---
+
+**Website Summary to Classify:**
+"{summary}"
+
+**INSTRUCTIONS:**
+1.  Read the provided summary.
+2.  Based *only* on the summary, choose the most accurate `main_category_code` and `subcategory_code` from the schema.
+3.  Construct a JSON object with your results.
+
+**OUTPUT RULES:**
+- Your response **MUST ONLY** be a single, valid JSON object.
+- The JSON **MUST** contain two keys: `main_category_code` and `subcategory_code`.
+
+Now, classify the summary and provide ONLY the JSON object.
+"""
+
 
 class AIClassifier:
     """分類器的抽象基底類別"""
-    def classify_from_knowledge(self, url):
-        raise NotImplementedError
-
     def classify_from_content(self, text_content, url):
         raise NotImplementedError
 
@@ -381,17 +338,24 @@ class LocalOllamaClassifier(AIClassifier):
         self.schema_json_str = schema_json
         print(f"本地 Ollama 分類器已初始化，使用模型: {self.model}")
 
-    def _call_ollama(self, prompt, url_for_log):
-        payload = {"model": self.model, "prompt": prompt, "format": "json", "stream": False}
+    def _call_ollama(self, prompt, url_for_log, expect_json=False):
+        payload = {"model": self.model, "prompt": prompt, "stream": False}
+        if expect_json:
+            payload["format"] = "json"
+        
         try:
-            print(f"正在向本地 Ollama API 請求: {url_for_log}")
+            print(f"正在向本地 Ollama API 請求 ({'JSON' if expect_json else 'Text'}): {url_for_log}")
             response = requests.post(self.api_url, json=payload, timeout=180)
             response.raise_for_status()
             response_data = response.json()
             raw_response_str = response_data.get('response', '')
             print(f"DEBUG: Ollama 原始回覆: {raw_response_str}")
             if not raw_response_str: return None
-            return json.loads(raw_response_str.strip().lstrip('```json').rstrip('```').strip())
+            
+            if expect_json:
+                return json.loads(raw_response_str.strip().lstrip('```json').rstrip('```').strip())
+            else:
+                return raw_response_str.strip()
         except requests.exceptions.ConnectionError:
             print(f"\n錯誤：無法連線至本地 Ollama 服務 ({self.api_url})。")
             exit()
@@ -399,43 +363,26 @@ class LocalOllamaClassifier(AIClassifier):
             print(f"呼叫本地 Ollama API 或處理回傳時發生錯誤: {e}")
             return None
 
-    def classify_from_knowledge(self, url):
-        prompt = get_knowledge_check_prompt(self.schema_json_str, url)
-        return self._call_ollama(prompt, url)
-
     def classify_from_content(self, text_content, url):
-        prompt = get_content_analysis_prompt(self.schema_json_str, url, text_content[:8000])
-        return self._call_ollama(prompt, url)
-
-class GeminiClassifier(AIClassifier):
-    """使用 Google Gemini API 進行兩階段分類"""
-    def __init__(self, model_name, api_key, schema_json):
-        if not api_key:
-            raise ValueError("未提供 Gemini API 金鑰。請設定 'GEMINI_API_KEY' 環境變數。")
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(
-            model_name,
-            generation_config=genai.GenerationConfig(response_mime_type="application/json")
-        )
-        self.schema_json_str = schema_json
-        print(f"Gemini API 分類器已初始化，使用模型: {model_name}")
-
-    def _call_gemini(self, prompt, url_for_log):
-        try:
-            print(f"正在向 Gemini API 請求: {url_for_log}")
-            response = self.model.generate_content(prompt)
-            return json.loads(response.text)
-        except Exception as e:
-            print(f"呼叫 Gemini API 或處理回傳時發生錯誤: {e}")
+        """執行「摘要 -> 分類」的兩階段流程"""
+        summary_prompt = get_summary_prompt(text_content[:8000])
+        summary = self._call_ollama(summary_prompt, f"{url} [摘要階段]")
+        
+        if not summary:
+            print("錯誤：第一階段未能產生摘要。")
             return None
+        
+        print(f"INFO: 第一階段摘要完成: {summary}")
 
-    def classify_from_knowledge(self, url):
-        prompt = get_knowledge_check_prompt(self.schema_json_str, url)
-        return self._call_gemini(prompt, url)
-
-    def classify_from_content(self, text_content, url):
-        prompt = get_content_analysis_prompt(self.schema_json_str, url, text_content[:15000])
-        return self._call_gemini(prompt, url)
+        classification_prompt = get_classification_from_summary_prompt(self.schema_json_str, summary)
+        classification_result = self._call_ollama(classification_prompt, f"{url} [分類階段]", expect_json=True)
+        
+        if not classification_result:
+            print("錯誤：第二階段未能產生分類。")
+            return None
+            
+        classification_result["summary"] = summary
+        return classification_result
 
 
 class WebScraper:
@@ -550,7 +497,7 @@ class WebCrawler:
                 if root_url:
                     self.processed_domains.add(new_domain)
                     self.urls_to_crawl.append(root_url)
-                    self.db_manager.add_to_queue(root_url)
+                    self.db_manager.add_to_queue(root_url) 
                     print(f"發現新域名 {new_domain}，已將根 URL 加入佇列: {root_url}")
 
     def run(self, max_domains):
@@ -566,15 +513,6 @@ class WebCrawler:
             
             print(f"\n--- 開始處理 ({self.crawled_count + 1}/{max_domains}): {url} ---")
             
-            knowledge_result = self.classifier.classify_from_knowledge(url)
-
-            classification_successful = False
-            if knowledge_result and knowledge_result.get("known") is True:
-                print(f"INFO: AI 認識此網站，直接使用知識庫進行分類。")
-                classification_successful = self._save_classification(domain, url, knowledge_result)
-            else:
-                print(f"INFO: AI 不認識此網站或回覆格式不符，將進行網頁內容分析。")
-            
             html_content, final_url = self.scraper.fetch(url)
 
             if not html_content:
@@ -584,20 +522,19 @@ class WebCrawler:
 
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            if not classification_successful:
-                print("INFO: 開始進行網頁內容分析...")
-                for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
-                    tag.decompose()
-                text_content = soup.get_text(separator=' ', strip=True)
+            print("INFO: 開始進行網頁內容分析...")
+            for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
+                tag.decompose()
+            text_content = soup.get_text(separator=' ', strip=True)
 
-                if text_content and len(text_content) > 150:
-                    content_result = self.classifier.classify_from_content(text_content, final_url)
-                    if content_result:
-                        self._save_classification(self.get_domain(final_url), final_url, content_result)
-                    else:
-                        print(f"域名 {domain} 的內容分析失敗。")
+            if text_content and len(text_content) > 150:
+                content_result = self.classifier.classify_from_content(text_content, final_url)
+                if content_result:
+                    self._save_classification(self.get_domain(final_url), final_url, content_result)
                 else:
-                    print(f"域名 {domain} 的文字內容太少，無法進行內容分析。")
+                    print(f"域名 {domain} 的內容分析失敗。")
+            else:
+                print(f"域名 {domain} 的文字內容太少，無法進行內容分析。")
 
             self._find_and_queue_new_links(soup, final_url)
             
@@ -611,20 +548,17 @@ def main():
         print("警告：未安裝 Selenium 相關套件，備援抓取功能將無法使用。")
         print("建議執行：pip install selenium webdriver-manager")
 
-    classifier = None
-    if USE_LOCAL_AI:
-        classifier = LocalOllamaClassifier(model=LOCAL_AI_MODEL, api_url=LOCAL_AI_URL, schema_json=CLASSIFICATION_SCHEMA_JSON)
-    else:
-        if not GEMINI_API_KEY:
-            print("錯誤：當 USE_LOCAL_AI 為 False 時，必須設定 'GEMINI_API_KEY' 環境變數。")
-            return
-        classifier = GeminiClassifier(model_name=GEMINI_MODEL_NAME, api_key=GEMINI_API_KEY, schema_json=CLASSIFICATION_SCHEMA_JSON)
+    if not USE_LOCAL_AI:
+        print("錯誤：目前的兩階段分類邏輯僅為本地 AI 進行了優化。請將 USE_LOCAL_AI 設為 True。")
+        return
+        
+    classifier = LocalOllamaClassifier(model=LOCAL_AI_MODEL, api_url=LOCAL_AI_URL, schema_json=CLASSIFICATION_SCHEMA_JSON)
 
     db_manager = None
     scraper = WebScraper()
     try:
         db_manager = DatabaseManager(DB_NAME)
-        db_manager.setup_tables()
+        db_manager.setup_tables() 
         crawler = WebCrawler(start_urls=START_URLS, db_manager=db_manager, classifier=classifier, scraper=scraper)
         crawler.run(max_domains=MAX_DOMAINS_TO_CRAWL)
     except Exception as e:
