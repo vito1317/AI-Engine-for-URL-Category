@@ -31,13 +31,12 @@ if not USE_LOCAL_AI:
         print("錯誤：當使用雲端 AI 時，未安裝 'google-generativeai' 函式庫。請執行 'pip install google-generativeai'")
         exit()
 
-START_URLS = ["https://www.gamer.com.tw/", "https://www.dcard.tw/f", "https://www.ettoday.net/", "https://www.wikipedia.org/", "https://google.com.tw/", "https://www.yahoo.com/", "https://www.facebook.com/", "https://www.youtube.com/", "https://www.instagram.com/", "https://www.twitter.com/", "https://www.linkedin.com/", "https://www.reddit.com/", "https://www.quora.com/", "https://www.twitch.tv/", "https://www.netflix.com/", "https://www.amazon.com/", "https://www.ebay.com/", "https://www.alibaba.com/", "https://www.taobao.com/", "https://www.pchome.com.tw/", "https://www.ruten.com.tw/", "https://www.momoshop.com.tw/", "https://www.books.com.tw/", "https://www.cw.com.tw/", "https://www.chinatimes.com/", "https://www.ltn.com.tw/", "https://www.udn.com/", "https://www.bbc.com/", "https://www.cnn.com/", "https://www.nytimes.com/", "https://www.wsj.com/", "https://www.reuters.com/", "https://www.aljazeera.com/", "https://www.npr.org/", "https://www.bloomberg.com/", "https://www.forbes.com/", "https://www.theguardian.com/", "https://www.huffpost.com/", "https://www.vox.com/", "https://www.washingtonpost.com/", "https://www.vice.com/", "https://www.foxnews.com/", "https://www.infowars.com/", "https://github.com/"]
+START_URLS = ["https://www.gamer.com.tw/", "https://www.dcard.tw/f", "https://www.ettoday.net/", "https://www.wikipedia.org/", "https://google.com.tw/", "https://www.yahoo.com/", "https://www.facebook.com/", "https://www.youtube.com/", "https://www.instagram.com/", "https://www.twitter.com/", "https://www.linkedin.com/", "https://www.reddit.com/", "https://www.quora.com/", "https://www.twitch.tv/", "https://www.netflix.com/", "https://www.amazon.com/", "https://www.ebay.com/", "https://www.alibaba.com/", "https://www.taobao.com/", "https://www.pchome.com.tw/", "https://www.ruten.com.tw/", "https://www.momoshop.com.tw/", "https://www.books.com.tw/", "https://www.cw.com.tw/", "https://www.chinatimes.com/", "https://www.ltn.com.tw/", "https://www.udn.com/", "https://www.bbc.com/", "https://www.cnn.com/", "https://www.nytimes.com/", "https://www.wsj.com/", "https://www.reuters.com/", "https://www.aljazeera.com/", "https://www.npr.org/", "https://www.bloomberg.com/", "https://www.forbes.com/", "https://www.theguardian.com/", "https://www.huffpost.com/", "https://www.vox.com/", "https://www.washingtonpost.com/", "https://www.vice.com/", "https://www.foxnews.com/", "https://github.com/"]
 DB_NAME = "domain_classification.db"
 
 MAX_DOMAINS_TO_CRAWL = 20
-
 MAX_CLASSIFICATION_RETRIES = 3
-RETRY_DELAY = 3
+RETRY_DELAY = 5
 
 CLASSIFICATION_SCHEMA_JSON = """
 {
@@ -209,7 +208,6 @@ def build_code_maps(schema):
 
 MAIN_CATEGORY_MAP, SUBCATEGORY_MAP = build_code_maps(CLASSIFICATION_SCHEMA)
 
-
 class DatabaseManager:
     """負責處理所有與 SQLite 資料庫相關的操作"""
     def __init__(self, db_name):
@@ -253,9 +251,9 @@ class DatabaseManager:
                 (domain, main_cat_code, main_cat_name, sub_cat_code, sub_cat_name, summary, source_url)
             )
             self.conn.commit()
-            print(f"成功將分類紀錄新增至資料庫: {domain}")
+            print(f"✅ 成功將分類紀錄新增至資料庫: {domain} -> {sub_cat_name}")
         except sqlite3.Error as e:
-            print(f"新增資料至資料庫時發生錯誤: {e}")
+            print(f"❌ 新增資料至資料庫時發生錯誤: {e}")
     
     def add_to_queue(self, url):
         """將單一 URL 加入待爬取佇列資料表"""
@@ -289,7 +287,6 @@ class DatabaseManager:
     def close(self):
         self.conn.close()
         print("資料庫連線已關閉。")
-
 
 def get_knowledge_classification_prompt(schema_str, url):
     """
@@ -329,25 +326,29 @@ def get_content_summary_prompt(text_content):
 Your response MUST be only the one-sentence summary and nothing else.
 """
 
-def get_classification_from_summary_prompt(schema_str, url, summary):
-    """產生用於第二階段「基於摘要和URL分類」的提示"""
-    return f"""You are a JSON-generating robot. Your task is to classify the provided website based on its URL and summary.
+def get_classification_from_metadata_prompt(schema_str, url, title, description, summary):
+    """
+    (優化後) 產生用於最終分類的提示，使用多維度證據。
+    """
+    return f"""You are an expert JSON-generating robot. Your task is to accurately classify a website using the provided metadata.
 
 **Classification Schema:**
 ---
 {schema_str}
 ---
 
-**Information to Classify:**
+**Evidence to Analyze:**
 - **URL:** `{url}`
-- **Summary:** "{summary}"
+- **Page Title:** "{title}"
+- **Meta Description:** "{description}"
+- **AI-Generated Summary:** "{summary}"
 
 **INSTRUCTIONS:**
-1.  Analyze both the URL and the Summary to understand the website's true identity and purpose. The URL provides crucial context.
-2.  Based on your combined analysis, choose the most accurate `main_category_code` and `subcategory_code` from the schema.
-3.  Construct a JSON object with your results.
+1.  Synthesize all four pieces of evidence to understand the website's true purpose. The Title and Meta Description are often the most reliable clues.
+2.  Based on your comprehensive analysis, choose the single most accurate `main_category_code` and `subcategory_code` from the schema.
+3.  Construct a JSON object with your final classification.
 
-**SPECIAL RULE:** If the summary is "這是一個防火牆或安全檢查頁面。", you **MUST** classify it with `main_category_code: "999"` and `subcategory_code: "999-02"`.
+**SPECIAL RULE:** If the evidence strongly suggests a security check page (e.g., summary is "這是一個防火牆或安全檢查頁面。"), you **MUST** classify it with `main_category_code: "999"` and `subcategory_code: "999-02"`.
 
 **OUTPUT RULES:**
 - Your response **MUST ONLY** be a single, valid JSON object.
@@ -355,7 +356,6 @@ def get_classification_from_summary_prompt(schema_str, url, summary):
 
 Now, classify the website and provide ONLY the JSON object.
 """
-
 
 class AIClassifier:
     """分類器的抽象基底類別"""
@@ -365,11 +365,11 @@ class AIClassifier:
     def get_summary_from_content(self, text_content, url):
         raise NotImplementedError
         
-    def classify_from_summary(self, url, summary):
+    def classify_from_metadata(self, url, title, description, summary):
         raise NotImplementedError
 
 class LocalOllamaClassifier(AIClassifier):
-    """使用本地運行的 Ollama 服務進行兩階段分類"""
+    """使用本地運行的 Ollama 服務進行分類"""
     def __init__(self, model, api_url, schema_json):
         self.model = model
         self.api_url = api_url
@@ -382,12 +382,11 @@ class LocalOllamaClassifier(AIClassifier):
             payload["format"] = "json"
         
         try:
-            print(f"正在向本地 Ollama API 請求 ({'JSON' if expect_json else 'Text'}): {url_for_log}")
+            print(f"  - 向本地 Ollama API 請求 ({'JSON' if expect_json else 'Text'}) for {url_for_log}...")
             response = requests.post(self.api_url, json=payload, timeout=180)
             response.raise_for_status()
             response_data = response.json()
             raw_response_str = response_data.get('response', '')
-            print(f"DEBUG: Ollama 原始回覆: {raw_response_str}")
             if not raw_response_str: return None
             
             cleaned_str = re.sub(r'<think>.*?</think>', '', raw_response_str, flags=re.DOTALL).strip()
@@ -397,45 +396,30 @@ class LocalOllamaClassifier(AIClassifier):
                 return json.loads(json_str)
             else:
                 return cleaned_str
+        except requests.exceptions.Timeout:
+            print(f"  - 呼叫本地 Ollama API 時發生超時錯誤 for {url_for_log}")
+            return None
         except requests.exceptions.ConnectionError:
-            print(f"\n錯誤：無法連線至本地 Ollama 服務 ({self.api_url})。")
+            print(f"\n❌ 錯誤：無法連線至本地 Ollama 服務 ({self.api_url})。")
             exit()
+        except json.JSONDecodeError as e:
+            print(f"  - 解析來自 Ollama 的 JSON 回覆時發生錯誤: {e}")
+            return None
         except Exception as e:
-            print(f"呼叫本地 Ollama API 或處理回傳時發生錯誤: {e}")
+            print(f"  - 呼叫本地 Ollama API 或處理回傳時發生未知錯誤: {e}")
             return None
 
     def classify_from_knowledge(self, url):
-        result = None
-        for attempt in range(MAX_CLASSIFICATION_RETRIES):
-            prompt = get_knowledge_classification_prompt(self.schema_json_str, url)
-            knowledge_result = self._call_ollama(prompt, f"{url} [知識庫分類]", expect_json=True)
-            if knowledge_result and knowledge_result.get("known"):
-                result = knowledge_result
-                break
-            elif knowledge_result and not knowledge_result.get("known"):
-                result = knowledge_result
-                break
-            print(f"警告：知識庫分類失敗或回覆格式不符。將在 {RETRY_DELAY} 秒後進行第 {attempt + 1} 次重試...")
-            time.sleep(RETRY_DELAY)
-        return result
+        prompt = get_knowledge_classification_prompt(self.schema_json_str, url)
+        return self._call_ollama(prompt, f"{url} [知識庫分類]", expect_json=True)
 
     def get_summary_from_content(self, text_content, url):
         prompt = get_content_summary_prompt(text_content[:8000])
         return self._call_ollama(prompt, f"{url} [內容摘要]")
 
-    def classify_from_summary(self, url, summary):
-        classification_result = None
-        for attempt in range(MAX_CLASSIFICATION_RETRIES):
-            prompt = get_classification_from_summary_prompt(self.schema_json_str, url, summary)
-            result = self._call_ollama(prompt, f"{url} [分類階段]", expect_json=True)
-            if result and result.get("main_category_code"):
-                classification_result = result
-                break
-            print(f"警告：分類階段失敗。將在 {RETRY_DELAY} 秒後進行第 {attempt + 1} 次重試...")
-            time.sleep(RETRY_DELAY)
-        
-        return classification_result
-
+    def classify_from_metadata(self, url, title, description, summary):
+        prompt = get_classification_from_metadata_prompt(self.schema_json_str, url, title, description, summary)
+        return self._call_ollama(prompt, f"{url} [元數據分類]", expect_json=True)
 
 class WebScraper:
     """負責抓取網頁內容，具備 Selenium 備援機制"""
@@ -444,27 +428,25 @@ class WebScraper:
     
     def fetch(self, url):
         """主抓取函式，優先使用 requests"""
-        print(f"正在使用 Requests 嘗試抓取 {url} ...")
+        print(f"  - 正在使用 Requests 嘗試抓取 {url} ...")
         try:
             response = requests.get(url, headers=self.headers, timeout=15, allow_redirects=True)
-            if response.status_code == 200:
-                print("Requests 抓取成功。")
-                return response.content, response.url
-            else:
-                print(f"Requests 失敗，狀態碼: {response.status_code}。將嘗試使用 Selenium。")
-                return self._fetch_with_selenium(url)
+            response.raise_for_status()
+            print("  - Requests 抓取成功。")
+            return response.content, response.url
         except requests.exceptions.RequestException as e:
-            print(f"Requests 發生錯誤: {e}。將嘗試使用 Selenium。")
+            print(f"  - Requests 發生錯誤: {e}。將嘗試使用 Selenium。")
             return self._fetch_with_selenium(url)
 
     def _fetch_with_selenium(self, url):
         """使用 Selenium 作為備援抓取方式"""
         if not SELENIUM_AVAILABLE:
-            print("警告: 未安裝 Selenium，無法使用備援抓取。")
+            print("  - 警告: 未安裝 Selenium，無法使用備援抓取。")
             return None, None
         
-        print(f"正在使用 Selenium 嘗試抓取 {url} ...")
+        print(f"  - 正在使用 Selenium 嘗試抓取 {url} ...")
         options = ChromeOptions()
+        options.add_argument("--headless")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         driver = None
@@ -475,10 +457,10 @@ class WebScraper:
             time.sleep(5)
             page_source = driver.page_source
             final_url = driver.current_url
-            print("Selenium 抓取成功。")
+            print("  - Selenium 抓取成功。")
             return page_source, final_url
         except Exception as e:
-            print(f"Selenium 抓取時發生錯誤: {e}")
+            print(f"  - Selenium 抓取時發生錯誤: {e}")
             return None, None
         finally:
             if driver:
@@ -497,38 +479,48 @@ class WebCrawler:
             self.urls_to_crawl = deque(queue_from_db)
             print(f"成功從資料庫載入 {len(queue_from_db)} 個待辦項目。")
         else:
-            initial_root_urls = sorted(list(set(filter(None, [self.get_root_url(url) for url in start_urls]))))
+            initial_root_urls = sorted(list(set(filter(None, [self._get_root_url(url) for url in start_urls]))))
             self.urls_to_crawl = deque(initial_root_urls)
             print("資料庫中無待辦項目，從 START_URLS 初始化佇列。")
             for url in initial_root_urls:
                 self.db_manager.add_to_queue(url)
         
-        self.processed_domains = {self.get_domain(url) for url in self.urls_to_crawl}
-        print(f"DEBUG: 初始化完成，已處理/待處理域名共 {len(self.processed_domains)} 個。")
+        self.processed_domains = {self._get_domain(url) for url in self.urls_to_crawl}
 
-
-    def get_domain(self, url):
+    def _get_domain(self, url):
         try: return urlparse(url).netloc
         except: return None
 
-    def get_root_url(self, url):
+    def _get_root_url(self, url):
         try:
             parsed = urlparse(url)
             return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
         except: return None
 
+    def _is_classification_valid(self, result):
+        """(新增) 驗證分類結果是否合乎邏輯"""
+        if not result or not isinstance(result, dict):
+            return False
+        main_cat_code = result.get("main_category_code")
+        sub_cat_code = result.get("subcategory_code")
+        
+        if not main_cat_code or not sub_cat_code:
+            return False
+        if main_cat_code not in MAIN_CATEGORY_MAP:
+            return False
+        if sub_cat_code not in SUBCATEGORY_MAP:
+            return False
+        if not sub_cat_code.startswith(main_cat_code):
+            return False
+        return True
+
     def _save_classification(self, domain, url, classification_result):
-        """將分類結果儲存至資料庫的輔助函式"""
+        """將已驗證的分類結果儲存至資料庫"""
         main_cat_code = classification_result.get("main_category_code")
         sub_cat_code = classification_result.get("subcategory_code")
-        
-        if main_cat_code not in MAIN_CATEGORY_MAP or sub_cat_code not in SUBCATEGORY_MAP or not sub_cat_code.startswith(main_cat_code):
-             print(f"警告: AI 回傳了無效或不匹配的代碼。Main: {main_cat_code}, Sub: {sub_cat_code}")
-             return False
-        
         summary = classification_result.get("summary", "無法生成摘要")
-        main_cat_name = MAIN_CATEGORY_MAP.get(main_cat_code, "未知")
-        sub_cat_name = SUBCATEGORY_MAP.get(sub_cat_code, "未知")
+        main_cat_name = MAIN_CATEGORY_MAP.get(main_cat_code)
+        sub_cat_name = SUBCATEGORY_MAP.get(sub_cat_code)
         
         self.db_manager.add_domain_classification(domain, main_cat_code, main_cat_name, sub_cat_code, sub_cat_name, summary, url)
         self.crawled_count += 1
@@ -536,20 +528,23 @@ class WebCrawler:
 
     def _find_and_queue_new_links(self, soup, base_url):
         """從頁面中尋找新的、未處理過的根 URL 並加入佇列"""
+        new_links_found = 0
         for link in soup.find_all('a', href=True):
             href = link['href']
             if not href: continue
             
             absolute_url = urljoin(base_url, href)
-            new_domain = self.get_domain(absolute_url)
+            new_domain = self._get_domain(absolute_url)
             
             if new_domain and new_domain not in self.processed_domains:
-                root_url = self.get_root_url(absolute_url)
+                root_url = self._get_root_url(absolute_url)
                 if root_url:
                     self.processed_domains.add(new_domain)
                     self.urls_to_crawl.append(root_url)
                     self.db_manager.add_to_queue(root_url) 
-                    print(f"發現新域名 {new_domain}，已將根 URL 加入佇列: {root_url}")
+                    new_links_found += 1
+        if new_links_found > 0:
+            print(f"  - 🔗 發現並新增了 {new_links_found} 個新域名到佇列。")
 
     def run(self, max_domains):
         """執行爬蟲主迴圈"""
@@ -557,60 +552,78 @@ class WebCrawler:
             url = self.urls_to_crawl.popleft()
             self.db_manager.remove_from_queue(url)
             
-            domain = self.get_domain(url)
-
+            domain = self._get_domain(url)
             if not domain or self.db_manager.domain_exists(domain):
+                print(f"⏭️  跳過已處理或無效的域名: {domain or url}")
                 continue
             
-            print(f"\n--- 開始處理 ({self.crawled_count + 1}/{max_domains}): {url} ---")
+            print(f"\n--- 處理中 ({self.crawled_count + 1}/{max_domains}): {url} ---")
             
+            final_classification = None
+            
+            print("1. 嘗試知識庫分類...")
             knowledge_result = self.classifier.classify_from_knowledge(url)
-
-            classification_successful = False
-            if knowledge_result and knowledge_result.get("known"):
-                print(f"INFO: AI 認識此網站，直接使用知識庫進行分類。")
-                if self._save_classification(domain, url, knowledge_result):
-                    classification_successful = True
             
-            if not classification_successful:
-                print(f"INFO: AI 不認識此網站 {url} 或知識庫分類失敗，將抓取內容進行分析。")
+            if knowledge_result and knowledge_result.get("known", False):
+                if self._is_classification_valid(knowledge_result):
+                    print("  - 🧠 AI 認識此網站且分類有效，直接採用。")
+                    final_classification = knowledge_result
+                else:
+                    print(f"  - ⚠️ 警告: AI 知識庫回傳了無效或不匹配的代碼。將轉向內容分析。")
+            else:
+                print("  - 🧠 AI 不認識此網站，將進行內容分析。")
+
+            if not final_classification:
+                print("2. 嘗試內容分析分類...")
                 html_content, final_url = self.scraper.fetch(url)
                 
                 if not html_content:
-                    print(f"錯誤: 使用所有方法抓取 {url} 皆失敗。將此域名標記為錯誤。")
-                    self._save_classification(domain, url, {"main_category_code": "999", "subcategory_code": "999-02", "summary": "爬蟲無法訪問此網站。"})
-                    continue
-                
-                soup = BeautifulSoup(html_content, 'html.parser')
-                for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
-                    tag.decompose()
-                text_content = soup.get_text(separator=' ', strip=True)
-
-                if text_content and len(text_content) > 150:
-                    summary = self.classifier.get_summary_from_content(text_content, final_url)
-                    if summary:
-                        print(f"INFO: 第一階段摘要完成: {summary}")
-                        classification_result = self.classifier.classify_from_summary(final_url, summary)
-                        if classification_result:
-                            classification_result['summary'] = summary
-                            self._save_classification(self.get_domain(final_url), final_url, classification_result)
-                        else:
-                            print(f"域名 {domain} 的分類階段失敗。")
-                    else:
-                        print(f"域名 {domain} 的摘要階段失敗。")
+                    print(f"  - ❌ 錯誤: 使用所有方法抓取 {url} 皆失敗。")
+                    final_classification = {"main_category_code": "999", "subcategory_code": "999-02", "summary": "爬蟲無法訪問此網站。"}
                 else:
-                    print(f"域名 {domain} 的文字內容太少，無法進行內容分析。")
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    title = soup.title.string.strip() if soup.title else ""
+                    description_tag = soup.find('meta', attrs={'name': 'description'})
+                    description = description_tag['content'].strip() if description_tag and 'content' in description_tag.attrs else ""
+                    
+                    for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
+                        tag.decompose()
+                    text_content = soup.get_text(separator=' ', strip=True)
+
+                    if not text_content or len(text_content) < 100:
+                        print(f"  - ⚠️ 警告: 域名 {domain} 的有效文字內容太少。")
+                        final_classification = {"main_category_code": "999", "subcategory_code": "999-99", "summary": "網站有效內容過少，無法分析。"}
+                    else:
+                        summary = self.classifier.get_summary_from_content(text_content, final_url)
+                        if not summary:
+                            print(f"  - ❌ 錯誤: 域名 {domain} 的摘要階段失敗。")
+                            final_classification = {"main_category_code": "999", "subcategory_code": "999-99", "summary": "AI 無法生成網站摘要。"}
+                        else:
+                            print(f"  - 摘要生成: {summary}")
+                            for attempt in range(MAX_CLASSIFICATION_RETRIES):
+                                print(f"  - 進行第 {attempt + 1}/{MAX_CLASSIFICATION_RETRIES} 次分類嘗試...")
+                                class_result = self.classifier.classify_from_metadata(final_url, title, description, summary)
+                                if self._is_classification_valid(class_result):
+                                    print("  - ✅ 分類結果有效！")
+                                    final_classification = class_result
+                                    final_classification['summary'] = summary
+                                    break
+                                else:
+                                    print(f"  - ⚠️ 警告: AI 回傳了無效或不匹配的代碼。將在 {RETRY_DELAY} 秒後重試...")
+                                    time.sleep(RETRY_DELAY)
+                            
+                            if not final_classification:
+                                print(f"  - ❌ 錯誤: 經過多次嘗試，域名 {domain} 仍無法獲得有效分類。")
+                                final_classification = {"main_category_code": "999", "subcategory_code": "999-99", "summary": "AI 多次無法提供有效分類。"}
+            
+            current_domain = self._get_domain(final_url or url)
+            self._save_classification(current_domain, final_url or url, final_classification)
             
             if 'html_content' in locals() and html_content:
-                 soup = BeautifulSoup(html_content, 'html.parser')
-                 self._find_and_queue_new_links(soup, url)
-            elif classification_successful:
-                 print("INFO: 抓取頁面以尋找新連結...")
-                 html_content, final_url = self.scraper.fetch(url)
-                 if html_content:
-                     soup = BeautifulSoup(html_content, 'html.parser')
-                     self._find_and_queue_new_links(soup, final_url)
-
+                soup = BeautifulSoup(html_content, 'html.parser')
+                self._find_and_queue_new_links(soup, final_url or url)
+            
             time.sleep(1)
 
         print(f"\n爬取完成！總共處理了 {self.crawled_count} 個域名。")
