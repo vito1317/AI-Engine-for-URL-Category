@@ -21,6 +21,8 @@ USE_LOCAL_AI = True
 LOCAL_AI_MODEL = 'deepseek-r1:32b' 
 LOCAL_AI_URL = 'http://localhost:11434/api/generate' 
 
+SELENIUM_HEADLESS = False
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL_NAME = 'gemini-2.5-pro'
 
@@ -444,16 +446,21 @@ class WebScraper:
             print("  - 警告: 未安裝 Selenium，無法使用備援抓取。")
             return None, None
         
-        print(f"  - 正在使用 Selenium 嘗試抓取 {url} ...")
+        mode = "顯示模式" if not SELENIUM_HEADLESS else "無頭模式"
+        print(f"  - 正在使用 Selenium ({mode}) 嘗試抓取 {url} ...")
+        
         options = ChromeOptions()
-        options.add_argument("--headless")
+        if SELENIUM_HEADLESS:
+            options.add_argument("--headless")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--start-maximized")
         driver = None
         try:
             service = ChromeService(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
             driver.get(url)
+            print("  - 等待頁面載入 5 秒...")
             time.sleep(5)
             page_source = driver.page_source
             final_url = driver.current_url
@@ -464,6 +471,9 @@ class WebScraper:
             return None, None
         finally:
             if driver:
+                if not SELENIUM_HEADLESS:
+                    print("  - 調試等待，3秒後關閉瀏覽器...")
+                    time.sleep(3)
                 driver.quit()
 
 class WebCrawler:
