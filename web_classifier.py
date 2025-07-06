@@ -560,7 +560,9 @@ class WebCrawler:
             print(f"\n--- 處理中 ({self.crawled_count + 1}/{max_domains}): {url} ---")
             
             final_classification = None
-            
+            html_content = None
+            final_url = url
+
             print("1. 嘗試知識庫分類...")
             knowledge_result = self.classifier.classify_from_knowledge(url)
             
@@ -575,12 +577,12 @@ class WebCrawler:
 
             if not final_classification:
                 print("2. 嘗試內容分析分類...")
-                html_content, final_url = self.scraper.fetch(url)
+                content, scraped_url = self.scraper.fetch(url)
                 
-                if not html_content:
-                    print(f"  - ❌ 錯誤: 使用所有方法抓取 {url} 皆失敗。")
-                    final_classification = {"main_category_code": "999", "subcategory_code": "999-02", "summary": "爬蟲無法訪問此網站。"}
-                else:
+                if content:
+                    html_content = content
+                    final_url = scraped_url
+
                     soup = BeautifulSoup(html_content, 'html.parser')
                     
                     title = soup.title.string.strip() if soup.title else ""
@@ -616,17 +618,28 @@ class WebCrawler:
                             if not final_classification:
                                 print(f"  - ❌ 錯誤: 經過多次嘗試，域名 {domain} 仍無法獲得有效分類。")
                                 final_classification = {"main_category_code": "999", "subcategory_code": "999-99", "summary": "AI 多次無法提供有效分類。"}
+                else:
+                    print(f"  - ❌ 錯誤: 使用所有方法抓取 {url} 皆失敗。")
+                    final_classification = {"main_category_code": "999", "subcategory_code": "999-02", "summary": "爬蟲無法訪問此網站。"}
             
-            current_domain = self._get_domain(final_url or url)
-            self._save_classification(current_domain, final_url or url, final_classification)
+            current_domain = self._get_domain(final_url)
+            self._save_classification(current_domain, final_url, final_classification)
             
-            if 'html_content' in locals() and html_content:
+            if html_content is None and final_classification.get("main_category_code") != "999":
+                print("  - 🔍 知識庫分類成功，現在抓取頁面以尋找新連結...")
+                content, scraped_url = self.scraper.fetch(url)
+                if content:
+                    html_content = content
+                    final_url = scraped_url
+            
+            if html_content:
                 soup = BeautifulSoup(html_content, 'html.parser')
-                self._find_and_queue_new_links(soup, final_url or url)
+                self._find_and_queue_new_links(soup, final_url)
             
             time.sleep(1)
 
         print(f"\n爬取完成！總共處理了 {self.crawled_count} 個域名。")
+
 
 def main():
     """主執行函數"""
